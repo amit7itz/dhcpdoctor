@@ -96,6 +96,7 @@ class DHCPClient:
     def craft_request(self, *args, **kwargs):
         self.request = self.craft_discover(*args, **kwargs)
         if settings.RELAY_MODE:
+            self.request = self.request[1:]  # remove Ethernet from packet
             self.add_relay(
                 self.request, settings.SERVER_ADDRESS, settings.RELAY_ADDRESS
             )
@@ -115,9 +116,7 @@ class DHCPClient:
             send(self.request, verbose=settings.DEBUG)
         else:
             # sending to local link, need to set Ethernet ourselves
-            sendp(
-                Ether(dst=self._get_ether_dst()) / self.request, verbose=settings.DEBUG
-            )
+            sendp(self.request, verbose=settings.DEBUG)
 
     def sniff_start(self):
         """Starts listening for packets in a new thread"""
@@ -170,13 +169,15 @@ class DHCPv4Client(DHCPClient):
         Returns:
             scapy.layers.inet.IP: DHCPDISCOVER packet
         """
-
         if not hw:
+            hw_str = get_if_hwaddr(conf.iface)
             _, hw = get_if_raw_hwaddr(conf.iface)
         else:
+            hw_str = hw
             hw = mac_str_to_bytes(hw)
         dhcp_discover = (
-            IP(src="0.0.0.0", dst="255.255.255.255")
+            Ether(src=hw_str, dst=self._get_ether_dst())
+            / IP(src="0.0.0.0", dst="255.255.255.255")
             / UDP(sport=68, dport=67)
             / BOOTP(chaddr=hw, xid=self.xid, flags=0x8000)
             / DHCP(options=[("message-type", "discover"), "end"])
@@ -256,11 +257,14 @@ class DHCPv6Client(DHCPClient):
         """
         if not hw:
             _, hw = get_if_raw_hwaddr(conf.iface)
+            hw_str = get_if_hwaddr(conf.iface)
         else:
+            hw_str = hw
             hw = mac_str_to_bytes(hw)
 
         dhcp_solicit = (
-            IPv6(dst="ff02::1:2")
+            Ether(src=hw_str, dst=self._get_ether_dst())
+            / IPv6(dst="ff02::1:2")
             / UDP(sport=546, dport=547)
             / DHCP6_Solicit(trid=self.xid)
             / DHCP6OptElapsedTime()
